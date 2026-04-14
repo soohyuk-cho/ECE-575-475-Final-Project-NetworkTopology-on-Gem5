@@ -59,6 +59,36 @@ CONFIG = {
 
 MESH_TOPOLOGIES = {"Mesh_XY", "Mesh_westfirst"}
 
+# Topologies that cannot be used directly via --topology= with Garnet synth traffic:
+#   Cluster  - extends BaseTopology (not SimpleTopology); __init__ takes no 'controllers' arg;
+#              must be composed manually inside a protocol's create_system()
+#   Pt2Pt    - technically works structurally but has no link weights, causing routing cycles
+#              that deadlock Garnet at the 50k-tick threshold at higher injection rates
+#   Crossbar - designed for --network=simple, not garnet; use CrossbarGarnet instead
+UNSUPPORTED_TOPOLOGIES = {"Cluster", "Pt2Pt", "Crossbar"}
+
+# Aliases: map shorthand/lowercase names to the exact class name gem5 expects.
+# gem5 does a case-sensitive module import (topologies.<name>), so the name
+# must exactly match the .py filename and class name.
+TOPOLOGY_ALIASES = {
+    "crossbar": "CrossbarGarnet",
+    "crossbargarnet": "CrossbarGarnet",
+    "mesh": "Mesh_XY",
+    "mesh_xy": "Mesh_XY",
+    "meshxy": "Mesh_XY",
+    "mesh_westfirst": "Mesh_westfirst",
+    "meshwestfirst": "Mesh_westfirst",
+    "westfirst": "Mesh_westfirst",
+    "ring": "Ring",
+    "tree": "Tree",
+    "star": "Star",
+}
+
+
+def resolve_topology(name: str) -> str:
+    """Resolve a topology name or alias to the canonical gem5 class name."""
+    return TOPOLOGY_ALIASES.get(name.lower(), name)
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
@@ -76,19 +106,37 @@ def get_mesh_rows(topology: str, num_cpus: int) -> int:
 
 
 def topology_exists(topology: str) -> bool:
-    """Check if a topology .py file exists in configs/topologies/."""
+    """Return True if topology is usable with Garnet synth traffic.
+
+    Checks both that the .py file exists and that the topology is not on
+    the known-incompatible list (Cluster, Pt2Pt, Crossbar).
+    """
+    if topology in UNSUPPORTED_TOPOLOGIES:
+        return False
     return os.path.isfile(os.path.join(CONFIG["topologies_dir"], f"{topology}.py"))
 
 
 def run_is_complete(outdir: str) -> bool:
-    """Check if a previous run completed successfully."""
+    """Check if a previous run completed with actual packet traffic.
+
+    A run that completed but produced only nan stats (e.g., sim_cycles too
+    short so zero packets traversed) is NOT considered complete — it should
+    be re-run. We check for a non-zero packets_received::total value.
+    """
     stats_file = os.path.join(outdir, "stats.txt")
     if not os.path.isfile(stats_file):
         return False
     try:
         with open(stats_file, "r") as f:
-            content = f.read()
-        return "average_packet_latency" in content
+            for line in f:
+                if "packets_received::total" in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            return int(parts[1]) > 0
+                        except ValueError:
+                            return False
+        return False
     except OSError:
         return False
 
@@ -164,13 +212,16 @@ def run_single(cmd: list[str], outdir: str) -> dict:
 def generate_core_sweep_jobs(args) -> list[dict]:
     """Generate all (topology, nodes, traffic, injection_rate) jobs."""
     jobs = []
-    topologies = [args.topology] if args.topology else CONFIG["topologies"]
+    topologies = [resolve_topology(args.topology)] if args.topology else CONFIG["topologies"]
     node_counts = [args.nodes] if args.nodes else CONFIG["node_counts"]
     traffic_patterns = [args.traffic] if args.traffic else CONFIG["traffic_patterns"]
 
     for topo in topologies:
+        if topo in UNSUPPORTED_TOPOLOGIES:
+            print(f"  SKIP: {topo} is not compatible with Garnet synth traffic (see UNSUPPORTED_TOPOLOGIES)")
+            continue
         if not topology_exists(topo):
-            print(f"  SKIP: {topo}.py not found in configs/topologies/")
+            print(f"  SKIP: {topo}.py not found in configs/topologies/ (not yet implemented)")
             continue
         for nodes in node_counts:
             for traffic in traffic_patterns:
