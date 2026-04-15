@@ -51,7 +51,7 @@ class Ring(SimpleTopology):
                 remainder_nodes.append(nodes[node_index])
                 
         # create the links from the controller nodes to the routers
-        # TODO: consider assignment, currently doing a high order interleave I think?, maybe better to do low order interleave?
+        # TODO: consider assignment, currently doing a high order interleave I think?, maybe better to do low order interleave
         ext_links = []
         for i, n in enumerate(network_nodes):
             cntrl_level, router_id = divmod(i, num_routers)
