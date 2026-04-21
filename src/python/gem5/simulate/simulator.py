@@ -24,6 +24,8 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
@@ -101,7 +103,7 @@ class Simulator:
         expected_execution_order: Optional[List[ExitEvent]] = None,
         max_ticks: Optional[int] = m5.MaxTick,
         id: Optional[int] = None,
-        outdir: Optional[str | Path] = None,
+        outdir: Optional[Union[str, Path]] = None,
     ) -> None:
         """
         :param board: The board to be simulated.
