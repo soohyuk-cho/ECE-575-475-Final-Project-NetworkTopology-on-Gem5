@@ -79,6 +79,7 @@ class Pt2Pt(SimpleTopology):
                             src_node=routers[i],
                             dst_node=routers[j],
                             latency=link_latency,
+                            weight=1,
                         )
                     )
 
