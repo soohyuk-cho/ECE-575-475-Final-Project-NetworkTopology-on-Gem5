@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -33,24 +34,27 @@ import networkx as nx
 # ──────────────────────────────────────────────────────────────────────
 
 RESULTS_ROOT = Path(__file__).resolve().parent / "results" / "core_sweep"
-PLOTS_DIR    = Path(__file__).resolve().parent / "plots" / "topology_diagrams"
+PLOTS_DIR = Path(__file__).resolve().parent / "plots" / "topology_diagrams"
 
-ROUTER_COLOR  = "#0072B2"
-LINK_COLOR    = "#888888"
-LABEL_COLOR   = "white"
-NODE_COLOR    = "#E69F00"   # external controller nodes (shown as small dots)
+ROUTER_COLOR = "#0072B2"
+LINK_COLOR = "#888888"
+LABEL_COLOR = "white"
+NODE_COLOR = "#E69F00"  # external controller nodes (shown as small dots)
 
-plt.rcParams.update({
-    "font.size": 11,
-    "savefig.dpi": 300,
-    "savefig.bbox": "tight",
-    "figure.facecolor": "white",
-})
+plt.rcParams.update(
+    {
+        "font.size": 11,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "figure.facecolor": "white",
+    }
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Config.json parsing
 # ──────────────────────────────────────────────────────────────────────
+
 
 def load_network(outdir: str) -> dict:
     """Load config.json and return the network sub-dict."""
@@ -77,10 +81,13 @@ def build_graph(network: dict):
     for link in network["int_links"]:
         src = router_id_from_path(link["src_node"])
         dst = router_id_from_path(link["dst_node"])
-        G.add_edge(src, dst,
-                   src_outport=link.get("src_outport", ""),
-                   dst_inport=link.get("dst_inport", ""),
-                   weight=link.get("weight", 1))
+        G.add_edge(
+            src,
+            dst,
+            src_outport=link.get("src_outport", ""),
+            dst_inport=link.get("dst_inport", ""),
+            weight=link.get("weight", 1),
+        )
 
     return G
 
@@ -89,8 +96,11 @@ def build_graph(network: dict):
 # Layout detection and positioning
 # ──────────────────────────────────────────────────────────────────────
 
+
 def detect_topology_type(network: dict) -> str:
-    """Infer topology from link port names."""
+    """Infer topology type from link port names and graph structure."""
+    from collections import Counter
+
     ports = set()
     for link in network["int_links"]:
         ports.add(link.get("src_outport", ""))
@@ -102,6 +112,20 @@ def detect_topology_type(network: dict) -> str:
         return "ring"
     if len(network["routers"]) == 1:
         return "crossbar"
+
+    # Tree: ports follow "to_N" / "from_N" naming pattern
+    non_empty = {p for p in ports if p}
+    if any(p.startswith("to_") or p.startswith("from_") for p in non_empty):
+        return "tree"
+
+    # Star: one hub router has out-degree == (N-1), spokes have out-degree == 1
+    n = len(network["routers"])
+    out_degree = Counter(
+        router_id_from_path(lnk["src_node"]) for lnk in network["int_links"]
+    )
+    if out_degree and max(out_degree.values()) == n - 1:
+        return "star"
+
     # Pt2Pt: fully connected, no named ports
     return "fully_connected"
 
@@ -113,7 +137,7 @@ def mesh_layout(n_routers: int, mesh_rows: int) -> dict:
     for i in range(n_routers):
         row = i // cols
         col = i % cols
-        pos[i] = (col, -row)   # y flipped so row 0 is at top
+        pos[i] = (col, -row)  # y flipped so row 0 is at top
     return pos
 
 
@@ -135,14 +159,52 @@ def fc_layout(n_routers: int) -> dict:
     return ring_layout(n_routers)
 
 
-def get_layout(G: nx.DiGraph, network: dict, topo_type: str,
-               mesh_rows: int = None) -> dict:
+def tree_layout(n_routers: int) -> dict:
+    """Hierarchical layout for binary tree (heap-index numbering).
+
+    Router i is at depth floor(log2(i+1)). Nodes at each level are spread
+    evenly across the full width so the tree fans out naturally.
+    """
+    pos = {}
+    max_depth = int(math.log2(n_routers)) if n_routers > 1 else 0
+    width = 2 ** max_depth  # total width in units (widest possible level)
+
+    for i in range(n_routers):
+        depth = int(math.log2(i + 1)) if i > 0 else 0
+        level_start = 2 ** depth - 1
+        pos_in_level = i - level_start
+        level_count = 2 ** depth
+        # centre each node within its slot
+        slot_width = width / level_count
+        x = (pos_in_level + 0.5) * slot_width - width / 2
+        y = -depth
+        pos[i] = (x, y)
+    return pos
+
+
+def star_layout(n_routers: int) -> dict:
+    """Hub at centre, spokes evenly distributed on a circle."""
+    pos = {0: (0.0, 0.0)}
+    n_spokes = n_routers - 1
+    for i in range(1, n_routers):
+        angle = 2 * math.pi * (i - 1) / n_spokes - math.pi / 2
+        pos[i] = (math.cos(angle), math.sin(angle))
+    return pos
+
+
+def get_layout(
+    G: nx.DiGraph, network: dict, topo_type: str, mesh_rows: int = None
+) -> dict:
     n = len(G.nodes)
     if topo_type == "mesh":
         rows = mesh_rows or max(1, int(math.isqrt(n)))
         return mesh_layout(n, rows)
     if topo_type == "ring":
         return ring_layout(n)
+    if topo_type == "tree":
+        return tree_layout(n)
+    if topo_type == "star":
+        return star_layout(n)
     if topo_type == "crossbar":
         return crossbar_layout(n)
     return fc_layout(n)
@@ -152,14 +214,20 @@ def get_layout(G: nx.DiGraph, network: dict, topo_type: str,
 # Drawing
 # ──────────────────────────────────────────────────────────────────────
 
-def draw_topology(network: dict, topology_name: str, nodes: int,
-                  output_path: str, mesh_rows: int = None) -> None:
+
+def draw_topology(
+    network: dict,
+    topology_name: str,
+    nodes: int,
+    output_path: str,
+    mesh_rows: int = None,
+) -> None:
     G = build_graph(network)
     topo_type = detect_topology_type(network)
     pos = get_layout(G, network, topo_type, mesh_rows)
 
     n_routers = len(G.nodes)
-    n_links   = len(network["int_links"])
+    n_links = len(network["int_links"])
 
     # Figure sizing: scale with node count
     fig_size = max(5, min(12, 2 + n_routers * 0.6))
@@ -171,7 +239,9 @@ def draw_topology(network: dict, topology_name: str, nodes: int,
     conn_style = "arc3,rad=0.0" if not is_fully_connected else "arc3,rad=0.15"
 
     nx.draw_networkx_edges(
-        G, pos, ax=ax,
+        G,
+        pos,
+        ax=ax,
         edge_color=LINK_COLOR,
         width=1.8 if not is_fully_connected else 0.7,
         alpha=0.7,
@@ -186,7 +256,9 @@ def draw_topology(network: dict, topology_name: str, nodes: int,
     # Draw routers as filled circles
     node_size = max(300, min(900, 3000 // n_routers))
     nx.draw_networkx_nodes(
-        G, pos, ax=ax,
+        G,
+        pos,
+        ax=ax,
         node_color=ROUTER_COLOR,
         node_size=node_size,
         edgecolors="white",
@@ -196,7 +268,9 @@ def draw_topology(network: dict, topology_name: str, nodes: int,
     # Router ID labels
     font_size = max(7, min(11, 120 // n_routers))
     nx.draw_networkx_labels(
-        G, pos, ax=ax,
+        G,
+        pos,
+        ax=ax,
         font_color=LABEL_COLOR,
         font_size=font_size,
         font_weight="bold",
@@ -210,30 +284,45 @@ def draw_topology(network: dict, topology_name: str, nodes: int,
             if src_port:
                 edge_labels[(u, v)] = src_port
         nx.draw_networkx_edge_labels(
-            G, pos, edge_labels=edge_labels, ax=ax,
-            font_size=6, font_color="#444444",
-            bbox=dict(boxstyle="round,pad=0.1", fc="white", alpha=0.6, ec="none"),
+            G,
+            pos,
+            edge_labels=edge_labels,
+            ax=ax,
+            font_size=6,
+            font_color="#444444",
+            bbox=dict(
+                boxstyle="round,pad=0.1", fc="white", alpha=0.6, ec="none"
+            ),
         )
 
     # Legend / info box
     legend_patches = [
         mpatches.Patch(color=ROUTER_COLOR, label=f"Router (×{n_routers})"),
     ]
-    ax.legend(handles=legend_patches, loc="upper right", fontsize=9,
-              framealpha=0.85)
+    ax.legend(
+        handles=legend_patches, loc="upper right", fontsize=9, framealpha=0.85
+    )
+
+    _mesh_label = {
+        "Mesh_westfirst": "2D Mesh (west-first adaptive routing)",
+        "Mesh_XY": "2D Mesh (XY deterministic routing)",
+    }.get(topology_name, "2D Mesh")
 
     topo_type_label = {
-        "mesh": "2D Mesh",
-        "ring": "Bidirectional Ring",
-        "crossbar": "Crossbar (single router)",
-        "fully_connected": "Fully Connected (Pt2Pt)",
+        "mesh": _mesh_label,
+        "ring": "Bidirectional Ring (CW/CCW shortest-path)",
+        "crossbar": "Crossbar (single shared router)",
+        "tree": "Binary Tree (heap-index, log N diameter)",
+        "star": "Star (hub-and-spoke, 2-hop max)",
+        "fully_connected": "Fully Connected / Pt2Pt (1-hop, O(N²) links)",
     }.get(topo_type, topo_type)
 
     ax.set_title(
         f"{topology_name}   —   {nodes} nodes   |   "
         f"{n_routers} routers, {n_links} directed links\n"
         f"({topo_type_label})",
-        fontsize=12, pad=10,
+        fontsize=12,
+        pad=10,
     )
     ax.axis("off")
 
@@ -246,6 +335,7 @@ def draw_topology(network: dict, topology_name: str, nodes: int,
 # ──────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────
+
 
 def find_representative_run(topology: str, nodes: int) -> str | None:
     """Find any completed run directory for (topology, nodes)."""
@@ -270,16 +360,31 @@ def infer_mesh_rows(topology: str, nodes: int) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize gem5 Garnet network topology")
-    parser.add_argument("--outdir", default=None,
-                        help="Specific gem5 run directory containing config.json")
-    parser.add_argument("--topology", default=None,
-                        help="Draw only this topology (from core_sweep results)")
-    parser.add_argument("--nodes", type=int, default=16,
-                        help="Node count to use when auto-finding runs (default: 16)")
-    parser.add_argument("--format", default="png",
-                        choices=["png", "pdf", "svg"],
-                        help="Output image format")
+    parser = argparse.ArgumentParser(
+        description="Visualize gem5 Garnet network topology"
+    )
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Specific gem5 run directory containing config.json",
+    )
+    parser.add_argument(
+        "--topology",
+        default=None,
+        help="Draw only this topology (from core_sweep results)",
+    )
+    parser.add_argument(
+        "--nodes",
+        type=int,
+        default=16,
+        help="Node count to use when auto-finding runs (default: 16)",
+    )
+    parser.add_argument(
+        "--format",
+        default="png",
+        choices=["png", "pdf", "svg"],
+        help="Output image format",
+    )
     args = parser.parse_args()
 
     fmt = args.format
@@ -287,9 +392,21 @@ def main():
     if args.outdir:
         # Single explicit directory
         network = load_network(args.outdir)
-        topo_name = Path(args.outdir).parts[-4] if len(Path(args.outdir).parts) >= 4 else "topology"
-        nodes_str = Path(args.outdir).parts[-3] if len(Path(args.outdir).parts) >= 3 else "Nnodes"
-        nodes = int("".join(filter(str.isdigit, nodes_str))) if nodes_str else args.nodes
+        topo_name = (
+            Path(args.outdir).parts[-4]
+            if len(Path(args.outdir).parts) >= 4
+            else "topology"
+        )
+        nodes_str = (
+            Path(args.outdir).parts[-3]
+            if len(Path(args.outdir).parts) >= 3
+            else "Nnodes"
+        )
+        nodes = (
+            int("".join(filter(str.isdigit, nodes_str)))
+            if nodes_str
+            else args.nodes
+        )
         mesh_rows = infer_mesh_rows(topo_name, nodes)
         out_path = str(PLOTS_DIR / f"topo_{topo_name}_{nodes}nodes.{fmt}")
         draw_topology(network, topo_name, nodes, out_path, mesh_rows)
@@ -301,7 +418,8 @@ def main():
         return
 
     topologies = (
-        [args.topology] if args.topology
+        [args.topology]
+        if args.topology
         else [d.name for d in sorted(RESULTS_ROOT.iterdir()) if d.is_dir()]
     )
 
@@ -328,9 +446,9 @@ def main():
                 print(f"  SKIP: no completed run for {topo}/{nodes}nodes")
                 continue
             try:
-                network  = load_network(run_dir)
+                network = load_network(run_dir)
                 mesh_rows = infer_mesh_rows(topo, nodes)
-                out_path  = str(PLOTS_DIR / f"topo_{topo}_{nodes}nodes.{fmt}")
+                out_path = str(PLOTS_DIR / f"topo_{topo}_{nodes}nodes.{fmt}")
                 draw_topology(network, topo, nodes, out_path, mesh_rows)
             except Exception as e:
                 print(f"  ERROR {topo}/{nodes}nodes: {e}")

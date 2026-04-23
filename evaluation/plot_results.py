@@ -10,6 +10,7 @@ Reads all_results.csv (produced by parse_stats.py) and generates:
   5. Topology x traffic heatmaps
   6. Sensitivity study plots
   7. Scalability plots
+  8. Latency decomposition (queueing vs. network component stacked bars)
 
 Usage:
     python3 evaluation/plot_results.py
@@ -146,22 +147,38 @@ def plot_throughput_vs_injrate(df: pd.DataFrame, output_dir: str, fmt: str) -> N
 # Plot 3: Saturation Point Comparison
 # ──────────────────────────────────────────────────────────────────────
 
-def find_saturation_rate(group: pd.DataFrame) -> float:
-    """Find injection rate where latency exceeds 2x minimum."""
-    valid = group.dropna(subset=["avg_packet_latency"])
-    valid = valid[valid["avg_packet_latency"] > 0].sort_values("injection_rate")
-    if len(valid) < 2:
-        return float("nan")
-    min_lat = valid["avg_packet_latency"].min()
-    threshold = 2.0 * min_lat
-    saturated = valid[valid["avg_packet_latency"] > threshold]
-    if saturated.empty:
-        return float("nan")
-    return saturated["injection_rate"].iloc[0]
+# Topologies whose tornado/transpose results are unreliable because Garnet
+# computes destinations using mesh row/col geometry, which is meaningless
+# for non-mesh topologies.
+MESH_ONLY_TRAFFIC = {"tornado", "transpose"}
+MESH_TOPOLOGIES_PLOT = {"Mesh_XY", "Mesh_westfirst"}
+
+
+def find_saturation_throughput(group: pd.DataFrame):
+    """Return (sat_injection_rate, sat_throughput) at the peak accepted traffic.
+
+    Standard NoC saturation definition: the injection rate at which accepted
+    throughput stops growing and begins to plateau or drop. We use the maximum
+    accepted_traffic point as the saturation throughput.
+
+    The old 2× latency threshold fails here because the base latency is already
+    high (network + queueing even at low load), so the ratio never reaches 2×
+    within the tested injection rate range.
+    """
+    valid = group.dropna(subset=["accepted_traffic"])
+    valid = valid[valid["accepted_traffic"] > 0].sort_values("injection_rate")
+    if valid.empty:
+        return float("nan"), float("nan")
+    idx_max = valid["accepted_traffic"].idxmax()
+    return valid.loc[idx_max, "injection_rate"], valid.loc[idx_max, "accepted_traffic"]
 
 
 def plot_saturation_comparison(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
-    """Grouped bar chart: X=topology, grouped by traffic, Y=saturation rate."""
+    """Two grouped bar charts per node count:
+      (a) Saturation throughput (max accepted_traffic) — the primary metric.
+      (b) Saturation injection rate — where peak throughput occurs.
+    Tornado/transpose bars for non-mesh topologies are hatched with a warning.
+    """
     print("Generating saturation comparison plots...")
     core = get_core_data(df)
 
@@ -170,31 +187,55 @@ def plot_saturation_comparison(df: pd.DataFrame, output_dir: str, fmt: str) -> N
         topos = sorted(node_data["topology"].unique())
         traffics = sorted(node_data["traffic"].unique())
 
-        sat_data = {}
+        sat_rate = {}
+        sat_tput = {}
         for topo in topos:
             for traffic in traffics:
-                group = node_data[(node_data["topology"] == topo) & (node_data["traffic"] == traffic)]
-                sat_data[(topo, traffic)] = find_saturation_rate(group)
+                group = node_data[
+                    (node_data["topology"] == topo) & (node_data["traffic"] == traffic)
+                ]
+                r, t = find_saturation_throughput(group)
+                sat_rate[(topo, traffic)] = r
+                sat_tput[(topo, traffic)] = t
 
-        fig, ax = plt.subplots()
         n_topos = len(topos)
         n_traffic = len(traffics)
         bar_width = 0.8 / max(n_traffic, 1)
         x = np.arange(n_topos)
 
-        for j, traffic in enumerate(traffics):
-            vals = [sat_data.get((t, traffic), float("nan")) for t in topos]
-            offset = (j - n_traffic / 2 + 0.5) * bar_width
-            ax.bar(x + offset, vals, bar_width * 0.9,
-                   color=COLORS[j % len(COLORS)], label=traffic)
+        for metric, data_dict, ylabel, suffix in [
+            ("Saturation Throughput (flits/cycle/node)", sat_tput,
+             "Max Accepted Traffic (flits/cycle/node)", "sat_throughput"),
+            ("Saturation Injection Rate", sat_rate,
+             "Injection Rate at Peak Throughput (packets/cycle/node)", "sat_injrate"),
+        ]:
+            fig, ax = plt.subplots()
+            for j, traffic in enumerate(traffics):
+                vals = [data_dict.get((t, traffic), float("nan")) for t in topos]
+                offset = (j - n_traffic / 2 + 0.5) * bar_width
+                bars = ax.bar(x + offset, vals, bar_width * 0.9,
+                              color=COLORS[j % len(COLORS)], label=traffic)
 
-        ax.set_xlabel("Topology")
-        ax.set_ylabel("Saturation Injection Rate")
-        ax.set_title(f"Saturation Point Comparison - {nodes} nodes")
-        ax.set_xticks(x)
-        ax.set_xticklabels(topos, rotation=30, ha="right")
-        ax.legend(fontsize=9)
-        save_fig(fig, output_dir, f"saturation_comparison_{nodes}", fmt)
+                # Hatch bars for non-mesh topologies under mesh-only traffic
+                if traffic in MESH_ONLY_TRAFFIC:
+                    for bar_patch, topo in zip(bars, topos):
+                        if topo not in MESH_TOPOLOGIES_PLOT:
+                            bar_patch.set_hatch("//")
+                            bar_patch.set_edgecolor("black")
+
+            ax.set_xlabel("Topology")
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"{metric} - {nodes} nodes")
+            ax.set_xticks(x)
+            ax.set_xticklabels(topos, rotation=30, ha="right")
+            legend = ax.legend(fontsize=9)
+            ax.annotate(
+                "⋰ = tornado/transpose destinations use mesh geometry;\n"
+                "    results for non-mesh topologies may not reflect true pattern.",
+                xy=(0.01, 0.01), xycoords="axes fraction",
+                fontsize=7, color="gray", va="bottom",
+            )
+            save_fig(fig, output_dir, f"{suffix}_{nodes}", fmt)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -222,17 +263,26 @@ def plot_avg_hops(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
         x = np.arange(len(topos))
         bars = ax.bar(x, hop_vals, color=COLORS[:len(topos)], width=0.6)
 
-        # Add value labels on bars
+        # Add value labels — place above bar, or just above baseline for 0-hop topos
+        max_val = max((v for v in hop_vals if not math.isnan(v)), default=1)
+        label_offset = max_val * 0.03
         for bar, val in zip(bars, hop_vals):
-            if not math.isnan(val):
-                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                        f"{val:.2f}", ha="center", va="bottom", fontsize=10)
+            if math.isnan(val):
+                continue
+            y = bar.get_height() + label_offset
+            # For 0-hop topologies (e.g. CrossbarGarnet single router),
+            # place the label above the baseline so it's visible
+            if val == 0:
+                y = label_offset
+            ax.text(bar.get_x() + bar.get_width() / 2, y,
+                    f"{val:.2f}", ha="center", va="bottom", fontsize=10)
 
         ax.set_xlabel("Topology")
         ax.set_ylabel("Average Hops")
         ax.set_title(f"Average Hop Count - {nodes} nodes")
         ax.set_xticks(x)
         ax.set_xticklabels(topos, rotation=30, ha="right")
+        ax.set_ylim(bottom=0)
         save_fig(fig, output_dir, f"avg_hops_{nodes}", fmt)
 
 
@@ -380,6 +430,99 @@ def plot_scalability(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Plot 8: Latency Decomposition (queueing vs. network component)
+# ──────────────────────────────────────────────────────────────────────
+
+def plot_latency_decomposition(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
+    """Stacked bar chart splitting avg flit latency into:
+      - Network component  (avg_flit_network_latency)   : router + link traversal
+      - Queueing component (avg_flit_queueing_latency)  : time waiting in VC queues
+
+    One figure per (traffic, nodes) at three injection rates:
+    low (0.05), moderate (0.20), and near-saturation (0.40).
+    Helps explain *why* topologies differ — structural hops vs. congestion.
+    """
+    print("Generating latency decomposition plots...")
+    core = get_core_data(df)
+
+    # Injection rates to show; pick closest available to each target
+    rates_available = sorted(core["injection_rate"].unique())
+    targets = [0.05, 0.20, 0.40]
+    selected_rates = [
+        min(rates_available, key=lambda r: abs(r - t)) for t in targets
+    ]
+    # Deduplicate while preserving order
+    seen = set()
+    selected_rates = [r for r in selected_rates if not (r in seen or seen.add(r))]
+
+    for traffic in sorted(core["traffic"].unique()):
+        for nodes in sorted(core["nodes"].unique()):
+            subset = core[(core["traffic"] == traffic) & (core["nodes"] == nodes)]
+            if subset.empty:
+                continue
+
+            # Drop rows missing both decomposition columns
+            needed = ["avg_flit_network_latency", "avg_flit_queueing_latency"]
+            subset = subset.dropna(subset=needed)
+            if subset.empty:
+                continue
+
+            topos = sorted(subset["topology"].unique())
+            n_topos = len(topos)
+            n_rates = len(selected_rates)
+            bar_width = 0.8 / max(n_rates, 1)
+            x = np.arange(n_topos)
+
+            fig, ax = plt.subplots()
+
+            # Color pairs per injection rate (network=solid, queueing=lighter)
+            rate_colors = [
+                ("#0072B2", "#56B4E9"),   # blue pair  — low rate
+                ("#D55E00", "#E69F00"),   # orange pair — moderate
+                ("#009E73", "#88CCAA"),   # green pair  — near-sat
+            ]
+
+            handles = []
+            for j, rate in enumerate(selected_rates):
+                rate_data = subset[subset["injection_rate"] == rate]
+                net_vals = []
+                q_vals = []
+                for topo in topos:
+                    row = rate_data[rate_data["topology"] == topo]
+                    if row.empty:
+                        net_vals.append(float("nan"))
+                        q_vals.append(float("nan"))
+                    else:
+                        net_vals.append(float(row["avg_flit_network_latency"].iloc[0]))
+                        q_vals.append(float(row["avg_flit_queueing_latency"].iloc[0]))
+
+                net_vals = np.array(net_vals, dtype=float)
+                q_vals   = np.array(q_vals,   dtype=float)
+                offset   = (j - n_rates / 2 + 0.5) * bar_width
+                col_net, col_q = rate_colors[j % len(rate_colors)]
+
+                b1 = ax.bar(x + offset, net_vals, bar_width * 0.9,
+                            color=col_net, label=f"inj={rate} network")
+                b2 = ax.bar(x + offset, q_vals, bar_width * 0.9,
+                            bottom=net_vals, color=col_q,
+                            label=f"inj={rate} queueing", hatch="//", alpha=0.85)
+                handles += [b1, b2]
+
+            ax.set_xlabel("Topology")
+            ax.set_ylabel("Average Flit Latency (ticks)")
+            ax.set_title(f"Latency Decomposition - {traffic}, {nodes} nodes")
+            ax.set_xticks(x)
+            ax.set_xticklabels(topos, rotation=30, ha="right")
+            ax.legend(handles=handles, fontsize=8, ncol=2, loc="upper left")
+            ax.annotate(
+                "Solid = router/link traversal  |  Hatched = VC queueing delay",
+                xy=(0.01, 0.99), xycoords="axes fraction",
+                fontsize=7, color="gray", va="top",
+            )
+            save_fig(fig, output_dir, f"latency_decomp_{traffic}_{nodes}", fmt)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────
 
@@ -401,15 +544,25 @@ def main():
     df = pd.read_csv(args.csv)
     print(f"Loaded {len(df)} rows from {args.csv}")
 
-    plot_latency_vs_injrate(df, args.output_dir, args.format)
-    plot_throughput_vs_injrate(df, args.output_dir, args.format)
-    plot_saturation_comparison(df, args.output_dir, args.format)
-    plot_avg_hops(df, args.output_dir, args.format)
-    plot_heatmap(df, args.output_dir, args.format)
-    plot_sensitivity(df, args.output_dir, args.format)
-    plot_scalability(df, args.output_dir, args.format)
+    d = args.output_dir
+    plot_latency_vs_injrate      (df, os.path.join(d, "latency"),      args.format)
+    plot_throughput_vs_injrate   (df, os.path.join(d, "throughput"),   args.format)
+    plot_saturation_comparison   (df, os.path.join(d, "saturation"),   args.format)
+    plot_avg_hops                (df, os.path.join(d, "hops"),         args.format)
+    plot_heatmap                 (df, os.path.join(d, "heatmaps"),     args.format)
+    plot_sensitivity             (df, os.path.join(d, "sensitivity"),  args.format)
+    plot_scalability             (df, os.path.join(d, "scalability"),  args.format)
+    plot_latency_decomposition   (df, os.path.join(d, "decomposition"),args.format)
 
-    print(f"\nAll plots saved to {args.output_dir}/")
+    print(f"\nAll plots saved under {args.output_dir}/")
+    print("  latency/       — avg packet latency vs. injection rate")
+    print("  throughput/    — accepted traffic vs. injection rate")
+    print("  saturation/    — peak throughput & saturation injection rate")
+    print("  hops/          — average hop count per topology")
+    print("  heatmaps/      — topology × traffic throughput heatmap")
+    print("  sensitivity/   — router latency & VC count sensitivity")
+    print("  scalability/   — latency vs. node count at moderate load")
+    print("  decomposition/ — flit latency split: network vs. queueing")
 
 
 if __name__ == "__main__":

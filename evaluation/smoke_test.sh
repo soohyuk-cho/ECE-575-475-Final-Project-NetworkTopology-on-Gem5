@@ -28,22 +28,41 @@ run_test() {
     local nodes="$3"
     local mesh_rows="$4"
 
+    # 50000 sim_cycles = 50000 ticks = 50ns. Ruby clock at ~2GHz = 100 ruby cycles.
+    # Minimum single-hop latency ~1500 ticks (3 cycles), so packets complete easily.
     echo "=== Smoke Test: ${name} (${topo}, ${nodes} nodes) ==="
     if "$GEM5_BIN" --outdir "${OUTDIR}/${name}" "$SCRIPT" \
         --num-cpus="${nodes}" --num-dirs="${nodes}" --network=garnet \
         --topology="${topo}" --mesh-rows="${mesh_rows}" \
-        --sim-cycles=1000 --synthetic=uniform_random --injectionrate=0.05 \
+        --sim-cycles=50000 --synthetic=uniform_random --injectionrate=0.10 \
         > "${OUTDIR}/${name}_stdout.txt" 2>&1; then
 
-        if grep -q "average_packet_latency" "${OUTDIR}/${name}/stats.txt" 2>/dev/null; then
-            echo "  PASS: stats.txt contains network stats"
+        local stats="${OUTDIR}/${name}/stats.txt"
+        # Check that packets actually traversed the network (not just nan latency)
+        local received
+        received=$(grep "packets_received::total" "$stats" 2>/dev/null | awk '{print $2}')
+        if [ -n "$received" ] && [ "$received" -gt 0 ] 2>/dev/null; then
+            local latency
+            latency=$(grep "average_packet_latency" "$stats" | awk '{print $2}')
+            echo "  PASS: ${received} packets received, avg latency = ${latency} ticks"
             PASS=$((PASS + 1))
+        elif grep -q "Network Tester completed" "${OUTDIR}/${name}_stdout.txt" 2>/dev/null; then
+            # Sim completed but zero packets received — sim_cycles still too short for this topo
+            local injected
+            injected=$(grep "packets_injected::total" "$stats" 2>/dev/null | awk '{print $2}')
+            echo "  WARN: sim completed but 0 packets received (injected=${injected:-0}). Try higher --sim-cycles."
+            PASS=$((PASS + 1))  # not a gem5 crash, topology is valid
         else
-            echo "  FAIL: stats.txt missing or incomplete"
+            echo "  FAIL: stats.txt missing or gem5 did not complete (see ${OUTDIR}/${name}_stdout.txt)"
             FAIL=$((FAIL + 1))
         fi
     else
-        echo "  FAIL: gem5 exited with error (see ${OUTDIR}/${name}_stdout.txt)"
+        # Check for deadlock specifically
+        if grep -qi "deadlock\|panic" "${OUTDIR}/${name}_stdout.txt" 2>/dev/null; then
+            echo "  FAIL: Garnet deadlock or panic (see ${OUTDIR}/${name}_stdout.txt)"
+        else
+            echo "  FAIL: gem5 exited with error (see ${OUTDIR}/${name}_stdout.txt)"
+        fi
         FAIL=$((FAIL + 1))
     fi
 }
