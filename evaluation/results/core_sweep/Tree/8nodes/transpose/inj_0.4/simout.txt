@@ -1,0 +1,35 @@
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+warn: Directory_Controller is deprecated. Use MI_example_Directory_Controller instead
+Global frequency set at 1000000000000 ticks per second
+warn: No dot file generated. Please install pydot to generate the dot file and pdf.
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/mem/dram_interface.cc:692: warn: DRAM device capacity (8192 Mbytes) does not match the address range assigned (64 Mbytes)
+src/base/statistics.hh:279: warn: One of the stats is a legacy stat. Legacy stat is a stat that does not belong to any statistics::Group. Legacy stat is deprecated.
+src/base/statistics.hh:279: warn: One of the stats is a legacy stat. Legacy stat is a stat that does not belong to any statistics::Group. Legacy stat is deprecated.
+src/base/statistics.hh:279: warn: One of the stats is a legacy stat. Legacy stat is a stat that does not belong to any statistics::Group. Legacy stat is deprecated.
+src/base/statistics.hh:279: warn: One of the stats is a legacy stat. Legacy stat is a stat that does not belong to any statistics::Group. Legacy stat is deprecated.
+src/mem/ruby/network/garnet/GarnetNetwork.cc:107: info: Garnet version 3.0
+gem5 Simulator System.  https://www.gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version 25.1.0.0
+gem5 compiled Apr 14 2026 14:10:06
+gem5 started Apr 23 2026 11:14:25
+gem5 executing on dynamic-oit-ip4-wifirestricted04-10-50-238-68.princeton.edu, pid 3018
+command line: /Users/soohyuk.cho/Desktop/Princeton/SP26/ECE-575-475-Final-Project-NetworkTopology-on-Gem5/build/NULL/gem5.opt --outdir /Users/soohyuk.cho/Desktop/Princeton/SP26/ECE-575-475-Final-Project-NetworkTopology-on-Gem5/evaluation/results/core_sweep/Tree/8nodes/transpose/inj_0.4 /Users/soohyuk.cho/Desktop/Princeton/SP26/ECE-575-475-Final-Project-NetworkTopology-on-Gem5/configs/example/garnet_synth_traffic.py --num-cpus=8 --num-dirs=8 --network=garnet --topology=Tree --mesh-rows=1 --sim-cycles=100000 --synthetic=transpose --injectionrate=0.4 --router-latency=1 --vcs-per-vnet=4
+
+info: Standard input is not a terminal, disabling listeners.
+src/mem/ruby/system/Sequencer.cc:709: warn: Replacement policy updates recently became the responsibility of SLICC state machines. Make sure to setMRU() near callbacks in .sm files!
+Exiting @ tick 100000 because Network Tester completed simCycles
