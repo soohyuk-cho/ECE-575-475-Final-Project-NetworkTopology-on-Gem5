@@ -40,37 +40,39 @@ class Pt2Pt(SimpleTopology):
     def makeTopology(self, options, network, IntLink, ExtLink, Router):
         nodes = self.nodes
 
-        # default values for link latency and router latency.
-        # Can be over-ridden on a per link/router basis
-        link_latency = options.link_latency  # used by simple and garnet
-        router_latency = options.router_latency  # only used by garnet
+        # Use num_cpus as the router count, consistent with all other topologies.
+        # Controllers (L1 caches + directories) are distributed evenly across
+        # routers via ext_links, exactly like Ring/Mesh/Tree/Star.
+        num_routers = options.num_cpus
+        link_latency = options.link_latency
+        router_latency = options.router_latency
 
-        # Create an individual router for each controller,
-        # and connect all to all.
-        # Since this is a high-radix router, router_latency should
-        # accordingly be set to a higher value than the default
-        # (which is 1 for mesh routers)
+        cntrls_per_router, remainder = divmod(len(nodes), num_routers)
+
         routers = [
             Router(router_id=i, latency=router_latency)
-            for i in range(len(nodes))
+            for i in range(num_routers)
         ]
         network.routers = routers
 
-        ext_links = [
-            ExtLink(
-                link_id=i,
-                ext_node=n,
-                int_node=routers[i],
-                latency=link_latency,
+        # Distribute controllers evenly across routers
+        ext_links = []
+        for i, n in enumerate(nodes):
+            cntrl_level, router_id = divmod(i, num_routers)
+            ext_links.append(
+                ExtLink(
+                    link_id=i,
+                    ext_node=n,
+                    int_node=routers[router_id],
+                    latency=link_latency,
+                )
             )
-            for (i, n) in enumerate(nodes)
-        ]
         network.ext_links = ext_links
 
         link_count = len(nodes)
         int_links = []
-        for i in range(len(nodes)):
-            for j in range(len(nodes)):
+        for i in range(num_routers):
+            for j in range(num_routers):
                 if i != j:
                     link_count += 1
                     int_links.append(

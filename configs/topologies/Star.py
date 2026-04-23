@@ -88,6 +88,7 @@ class Star(SimpleTopology):
                     src_node=hub,
                     dst_node=spoke,
                     latency=link_latency,
+                    weight=1,
                 )
             )
             link_count += 1
@@ -97,6 +98,7 @@ class Star(SimpleTopology):
                     src_node=spoke,
                     dst_node=hub,
                     latency=link_latency,
+                    weight=1,
                 )
             )
             link_count += 1
