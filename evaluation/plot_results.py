@@ -33,8 +33,32 @@ import pandas as pd
 # Style
 # ──────────────────────────────────────────────────────────────────────
 
-COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"]
-MARKERS = ["o", "s", "^", "D", "v", "P"]
+# 7 perceptually-distinct, colorblind-safe colors (one per topology)
+COLORS = [
+    "#0072B2",  # blue        — CrossbarGarnet
+    "#D55E00",  # vermillion  — Mesh_XY
+    "#009E73",  # green       — Mesh_westfirst
+    "#CC79A7",  # pink        — Ring
+    "#E69F00",  # orange      — Pt2Pt
+    "#882255",  # purple      — Tree
+    "#F0E442",  # yellow      — Star
+]
+MARKERS = ["o", "s", "^", "D", "v", "P", "X"]
+
+# Canonical topology order and stable per-topology color/marker lookup.
+# Any plot that iterates over a subset of topologies should use these dicts
+# so colors never shift when a topology is absent.
+TOPO_ORDER = [
+    "CrossbarGarnet",
+    "Mesh_XY",
+    "Mesh_westfirst",
+    "Ring",
+    "Pt2Pt",
+    "Tree",
+    "Star",
+]
+TOPO_COLOR  = {t: COLORS[i]  for i, t in enumerate(TOPO_ORDER)}
+TOPO_MARKER = {t: MARKERS[i] for i, t in enumerate(TOPO_ORDER)}
 
 plt.rcParams.update({
     "font.size": 12,
@@ -80,15 +104,15 @@ def plot_latency_vs_injrate(df: pd.DataFrame, output_dir: str, fmt: str) -> None
 
             fig, ax = plt.subplots()
             topos = sorted(subset["topology"].unique())
-            for i, topo in enumerate(topos):
+            for topo in topos:
                 tdata = subset[subset["topology"] == topo].sort_values("injection_rate")
                 valid = tdata.dropna(subset=["avg_packet_latency"])
                 if valid.empty:
                     continue
                 ax.plot(
                     valid["injection_rate"], valid["avg_packet_latency"],
-                    color=COLORS[i % len(COLORS)],
-                    marker=MARKERS[i % len(MARKERS)],
+                    color=TOPO_COLOR.get(topo, "#333333"),
+                    marker=TOPO_MARKER.get(topo, "o"),
                     markersize=5, linewidth=1.5, label=topo,
                 )
 
@@ -124,15 +148,15 @@ def plot_throughput_vs_injrate(df: pd.DataFrame, output_dir: str, fmt: str) -> N
             )
 
             topos = sorted(subset["topology"].unique())
-            for i, topo in enumerate(topos):
+            for topo in topos:
                 tdata = subset[subset["topology"] == topo].sort_values("injection_rate")
                 valid = tdata.dropna(subset=["accepted_traffic"])
                 if valid.empty:
                     continue
                 ax.plot(
                     valid["injection_rate"], valid["accepted_traffic"],
-                    color=COLORS[i % len(COLORS)],
-                    marker=MARKERS[i % len(MARKERS)],
+                    color=TOPO_COLOR.get(topo, "#333333"),
+                    marker=TOPO_MARKER.get(topo, "o"),
                     markersize=5, linewidth=1.5, label=topo,
                 )
 
@@ -261,7 +285,8 @@ def plot_avg_hops(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
 
         fig, ax = plt.subplots()
         x = np.arange(len(topos))
-        bars = ax.bar(x, hop_vals, color=COLORS[:len(topos)], width=0.6)
+        bar_colors = [TOPO_COLOR.get(t, "#333333") for t in topos]
+        bars = ax.bar(x, hop_vals, color=bar_colors, width=0.6)
 
         # Add value labels — place above bar, or just above baseline for 0-hop topos
         max_val = max((v for v in hop_vals if not math.isnan(v)), default=1)
@@ -409,15 +434,15 @@ def plot_scalability(df: pd.DataFrame, output_dir: str, fmt: str) -> None:
         fig, ax = plt.subplots()
         topos = sorted(traffic_data["topology"].unique())
 
-        for i, topo in enumerate(topos):
+        for topo in topos:
             tdata = traffic_data[traffic_data["topology"] == topo].sort_values("nodes")
             valid = tdata.dropna(subset=["avg_packet_latency"])
             if valid.empty:
                 continue
             ax.plot(
                 valid["nodes"], valid["avg_packet_latency"],
-                color=COLORS[i % len(COLORS)],
-                marker=MARKERS[i % len(MARKERS)],
+                color=TOPO_COLOR.get(topo, "#333333"),
+                marker=TOPO_MARKER.get(topo, "o"),
                 markersize=7, linewidth=1.5, label=topo,
             )
 
@@ -533,7 +558,7 @@ def main():
     parser = argparse.ArgumentParser(description="Plot gem5 Garnet evaluation results")
     parser.add_argument("--csv", default=default_csv, help="Input CSV path")
     parser.add_argument("--output-dir", default=default_output, help="Output directory for plots")
-    parser.add_argument("--format", default="pdf", choices=["pdf", "png", "svg"], help="Plot format")
+    parser.add_argument("--format", default="png", choices=["pdf", "png", "svg"], help="Plot format")
     args = parser.parse_args()
 
     if not os.path.isfile(args.csv):
