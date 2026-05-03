@@ -1,3 +1,39 @@
+# Evaluating Network Topology Tradeoffs in Gem5
+
+**ECE 475/575: Computer Architecture** (Spring 2026)
+**Princeton University**
+
+**Authors:**  
+- SooHyuk Cho (soohyuk.cho@princeton.edu)  
+- Daniel Li (dl4247@princeton.edu)
+
+This repository extends gem5 with custom Network-on-Chip (NoC) topologies and an automated evaluation framework for comparing their performance under synthetic traffic using the Garnet interconnect model.
+
+## Project Overview
+
+We implement and evaluate several on-chip network topologies in gem5's Garnet 2.0 framework, sweeping across injection rates, node counts, and traffic patterns to compare latency, throughput, and scalability.
+
+**Topologies implemented** (under [configs/topologies/](configs/topologies/)):
+
+| Topology | Description |
+|---|---|
+| `CrossbarGarnet` | Single shared router — ideal crossbar baseline |
+| `Mesh_XY` | 2D mesh with deterministic XY routing |
+| `Mesh_westfirst` | 2D mesh with west-first adaptive routing |
+| `Ring` | Bidirectional ring with CW/CCW shortest-path routing |
+| `Pt2Pt` | Fully connected — direct link between every pair of nodes |
+| `Star` | Single central hub connecting all nodes |
+| `Tree` | Binary tree with hierarchical routing |
+
+**Evaluation framework** (under [evaluation/](evaluation/)):
+- Automated parameter sweep across topologies, node counts, traffic patterns, and injection rates
+- Stats parsing into CSV for analysis
+- Publication-quality plots: latency curves, throughput, saturation, scalability, heatmaps, and latency decomposition
+
+> For full usage instructions — how to build gem5, run experiments, parse stats, and generate plots — see **[evaluation/README.md](evaluation/README.md)**.
+
+---
+
 # The gem5 Simulator
 
 This is the repository for the gem5 simulator. It contains the full source code

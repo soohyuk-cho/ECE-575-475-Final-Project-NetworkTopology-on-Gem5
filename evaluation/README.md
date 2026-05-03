@@ -1,5 +1,12 @@
 # NoC Topology Evaluation Framework
 
+**ECE 475/575: Computer Architecture** (Spring 2026)
+**Princeton University**
+
+**Authors:**  
+- SooHyuk Cho (soohyuk.cho@princeton.edu)  
+- Daniel Li (dl4247@princeton.edu)
+
 Automated sweep, analysis, and plotting pipeline for comparing on-chip network topologies in gem5 Garnet.
 
 Built for ECE 575/475 Final Project — Princeton University, Spring 2026.
